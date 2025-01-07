@@ -1,1 +1,0 @@
-CREATE DATABASE cab_db;
