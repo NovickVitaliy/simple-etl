@@ -55,7 +55,8 @@ while (true)
             //perform queries
             continue;
         case 3:
-            //remove duplicates
+            await csvCabDataProcessor.RemoveDuplicates();
+            Console.WriteLine("Duplicates were succesffully removed");
             continue;
         default:
             Console.WriteLine("Non existent option");

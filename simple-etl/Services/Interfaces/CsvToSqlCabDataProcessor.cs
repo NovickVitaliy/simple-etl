@@ -34,8 +34,8 @@ public class CsvToSqlCabDataProcessor : ICsvCabDataProcessor
         column.AutoIncrement = true;
         column.AutoIncrementSeed = 1;
         column.AutoIncrementStep = 1;
-        
-        
+
+
         dataTable.Columns.Add(column);
         dataTable.Columns.Add("tpep_pickup_datetime", typeof(DateTime));
         dataTable.Columns.Add("tpep_dropoff_datetime", typeof(DateTime));
@@ -59,7 +59,7 @@ public class CsvToSqlCabDataProcessor : ICsvCabDataProcessor
                 var passengerCount = 0;
                 int.TryParse(record.passenger_count as string, out passengerCount);
                 var tripDistance = double.Parse(record.trip_distance as string);
-                var storeAndFwdFlag = (record.store_and_fwd_flag as string) == "Y" ? "Yes" : "No";
+                var storeAndFwdFlag = (record.store_and_fwd_flag as string).Trim() == "Y" ? "Yes" : "No";
                 var pulocationId = int.Parse(record.PULocationID as string);
                 var dolocationId = int.Parse(record.DOLocationID as string);
                 var fareAmount = double.Parse(record.fare_amount as string);
@@ -94,6 +94,80 @@ public class CsvToSqlCabDataProcessor : ICsvCabDataProcessor
             return ErrorOr<bool>.Failure(e.Message);
         }
 
+        return ErrorOr<bool>.Success(true);
+    }
+
+    public async Task<ErrorOr<bool>> RemoveDuplicates()
+    {
+        await using var streamWriter = new StreamWriter(@"C:\Users\User\Downloads\duplicates.csv");
+        await using var csvWriter = new CsvWriter(streamWriter, CultureInfo.InvariantCulture);
+        await using var connection = _dbConnectionFactory.GetConnection();
+        await connection.OpenAsync();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+                          WITH DuplicateCTE AS (
+                              SELECT
+                                  tpep_pickup_datetime,
+                                  tpep_dropoff_datetime,
+                                  passenger_count,
+                                  COUNT(*) AS DuplicateCount
+                              FROM cab_data 
+                              GROUP BY
+                                  tpep_pickup_datetime,
+                                  tpep_dropoff_datetime,
+                                  passenger_count
+                              HAVING COUNT(*) > 1 
+                          )
+                          SELECT *
+                          FROM cab_data t
+                                   JOIN DuplicateCTE d
+                                        ON t.tpep_pickup_datetime = d.tpep_pickup_datetime
+                                            AND t.tpep_dropoff_datetime = d.tpep_dropoff_datetime
+                                            AND t.passenger_count = d.passenger_count;
+                          """;
+        
+        var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var tpepPickupDatetime = reader.GetDateTime("tpep_pickup_datetime");
+            var tpepDropoffDatetime = reader.GetDateTime("tpep_dropoff_datetime");
+            var passengerCount = reader.GetInt32("passenger_count");
+            var tripDistance = reader.GetDouble("trip_distance");
+            var storeAndFwdFlag = reader.GetString("store_and_fwd_flag");
+            var pulocationId = reader.GetInt32("PULocationID");
+            var dolocationId = reader.GetInt32("DOLocationID");
+            var fareAmount = reader.GetDouble("fare_amount");
+            var tipAmount = reader.GetDouble("tip_amount");
+            csvWriter.WriteRecord(new
+            {
+                tpepPickupDatetime,tpepDropoffDatetime,passengerCount,tripDistance,storeAndFwdFlag,
+                pulocationId, dolocationId, fareAmount, tipAmount
+            });
+            await csvWriter.NextRecordAsync();
+        }
+
+        await reader.CloseAsync();
+
+        cmd.CommandText = """
+                          WITH DuplicateCTE AS (
+                              SELECT
+                                  id,
+                                  ROW_NUMBER() OVER (PARTITION BY
+                                      tpep_pickup_datetime,
+                                      tpep_dropoff_datetime,
+                                      passenger_count
+                                      ORDER BY id) AS rn
+                              FROM cab_data
+                          )
+                          DELETE FROM cab_data
+                          WHERE id IN (
+                              SELECT id
+                              FROM DuplicateCTE
+                              WHERE rn > 1
+                          );
+                          """;
+        await cmd.ExecuteNonQueryAsync();
+        
         return ErrorOr<bool>.Success(true);
     }
 }
