@@ -51,8 +51,8 @@ public class CabDataProcessor : ICabDataProcessor
         var records = csv.GetRecords<dynamic>();
         foreach (var record in records)
         {
-            var tpepPickupDatetime = DateTime.Parse(record.tpep_pickup_datetime);
-            var tpepDropoffDatetime = DateTime.Parse(record.tpep_dropoff_datetime);
+            var tpepPickupDatetime = TimeZoneInfo.ConvertTimeToUtc(DateTime.Parse(record.tpep_pickup_datetime), TimeZoneInfo.Utc);
+            var tpepDropoffDatetime = TimeZoneInfo.ConvertTimeToUtc(DateTime.Parse(record.tpep_dropoff_datetime), TimeZoneInfo.Utc);
             int.TryParse(record.passenger_count as string, out int passengerCount);
             var tripDistance = double.Parse(record.trip_distance.ToString());
             var storeAndFwdFlag = record.store_and_fwd_flag.ToString().Trim() == "Y" ? "Yes" : "No";
