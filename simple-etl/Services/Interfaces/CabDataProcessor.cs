@@ -5,20 +5,21 @@ using CsvHelper;
 using Microsoft.Data.SqlClient;
 using simple_etl.Database;
 using simple_etl.ErrorHandling;
+using simple_etl.Models;
 using simple_etl.Services.Implementations;
 
 namespace simple_etl.Services.Interfaces;
 
-public class CsvToSqlCabDataProcessor : ICsvCabDataProcessor
+public class CabDataProcessor : ICabDataProcessor
 {
     private readonly DbConnectionFactory _dbConnectionFactory;
 
-    public CsvToSqlCabDataProcessor(DbConnectionFactory dbConnectionFactory)
+    public CabDataProcessor(DbConnectionFactory dbConnectionFactory)
     {
         _dbConnectionFactory = dbConnectionFactory;
     }
 
-    public async Task<ErrorOr<bool>> InsertIntoDb(string csvFilePath)
+    public async Task<ErrorOr<bool>> InsertIntoDbFromCsv(string csvFilePath)
     {
         if (string.IsNullOrWhiteSpace(csvFilePath))
         {
@@ -96,10 +97,10 @@ public class CsvToSqlCabDataProcessor : ICsvCabDataProcessor
 
         return ErrorOr<bool>.Success(true);
     }
-
-    public async Task<ErrorOr<bool>> RemoveDuplicates()
+    
+    public async Task<ErrorOr<bool>> RemoveDuplicatesAndMoveToCsv(string csvFilePath)
     {
-        await using var streamWriter = new StreamWriter(@"C:\Users\User\Downloads\duplicates.csv");
+        await using var streamWriter = new StreamWriter(csvFilePath);
         await using var csvWriter = new CsvWriter(streamWriter, CultureInfo.InvariantCulture);
         await using var connection = _dbConnectionFactory.GetConnection();
         await connection.OpenAsync();
@@ -169,5 +170,114 @@ public class CsvToSqlCabDataProcessor : ICsvCabDataProcessor
         await cmd.ExecuteNonQueryAsync();
         
         return ErrorOr<bool>.Success(true);
+    }
+    public async Task<long> FindLocationWithTheHighestTipAmountOnAverage()
+    {
+        await using var connection = _dbConnectionFactory.GetConnection();
+        await connection.OpenAsync();
+        var dbCommand = connection.CreateCommand();
+        dbCommand.CommandText = """
+                                SELECT TOP 1 PULocationID FROM cab_data
+                                GROUP BY PULocationID 
+                                ORDER BY AVG(tip_amount) DESC 
+                                """;
+        var id = (int?)await dbCommand.ExecuteScalarAsync();
+        return id.Value;
+    }
+    
+    public async Task<List<Fare>> Top100LongestFaresByDistance()
+    {
+        List<Fare> fares = [];
+        await using var connection = _dbConnectionFactory.GetConnection();
+        await connection.OpenAsync();
+        var dbCommand = connection.CreateCommand();
+        dbCommand.CommandText = """
+                                SELECT TOP 100 * FROM cab_data
+                                ORDER BY trip_distance DESC
+                                """;
+        await using var reader = await dbCommand.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var fare = new Fare
+            {
+                TpepPickupDatetime = reader.GetDateTime(reader.GetOrdinal("tpep_pickup_datetime")),
+                TpepDropoffDateTime = reader.GetDateTime(reader.GetOrdinal("tpep_dropoff_datetime")),
+                PassengerCount = reader.GetInt32(reader.GetOrdinal("passenger_count")),
+                TripDistance = reader.GetDouble(reader.GetOrdinal("trip_distance")),
+                StoreAndFwdFlag = reader.GetString(reader.GetOrdinal("store_and_fwd_flag")),
+                PULocationId = reader.GetInt32(reader.GetOrdinal("PULocationID")),
+                DOLocationId = reader.GetInt32(reader.GetOrdinal("DOLocationID")),
+                FareAmount = reader.GetDouble(reader.GetOrdinal("fare_amount")),
+                TipAmount = reader.GetDouble(reader.GetOrdinal("tip_amount"))
+            };
+            fares.Add(fare);
+        }
+
+        return fares;
+    }
+    
+    public async Task<List<Fare>> Top100LongestFaresByTime()
+    {
+        List<Fare> fares = [];
+        await using var connection = _dbConnectionFactory.GetConnection();
+        await connection.OpenAsync();
+        var dbCommand = connection.CreateCommand();
+        dbCommand.CommandText = """
+                                SELECT TOP 100 * FROM cab_data
+                                ORDER BY tpep_dropoff_datetime - tpep_pickup_datetime DESC
+                                """;
+        await using var reader = await dbCommand.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var fare = new Fare
+            {
+                TpepPickupDatetime = reader.GetDateTime(reader.GetOrdinal("tpep_pickup_datetime")),
+                TpepDropoffDateTime = reader.GetDateTime(reader.GetOrdinal("tpep_dropoff_datetime")),
+                PassengerCount = reader.GetInt32(reader.GetOrdinal("passenger_count")),
+                TripDistance = reader.GetDouble(reader.GetOrdinal("trip_distance")),
+                StoreAndFwdFlag = reader.GetString(reader.GetOrdinal("store_and_fwd_flag")),
+                PULocationId = reader.GetInt32(reader.GetOrdinal("PULocationID")),
+                DOLocationId = reader.GetInt32(reader.GetOrdinal("DOLocationID")),
+                FareAmount = reader.GetDouble(reader.GetOrdinal("fare_amount")),
+                TipAmount = reader.GetDouble(reader.GetOrdinal("tip_amount"))
+            };
+            fares.Add(fare);
+        }
+
+        return fares;
+    }
+    public async Task<List<Fare>> SearchByPickupLocation(int pickupLocationId)
+    {
+        List<Fare> fares = [];
+        await using var connection = _dbConnectionFactory.GetConnection();
+        await connection.OpenAsync();
+        var dbCommand = connection.CreateCommand();
+        dbCommand.CommandText = """
+                                SELECT * FROM cab_data
+                                WHERE PULocationID = @pickupLocationId
+                                """;
+        dbCommand.Parameters.Add(new SqlParameter("pickupLocationId", SqlDbType.Int)
+        {
+            Value = pickupLocationId
+        });
+        await using var reader = await dbCommand.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var fare = new Fare
+            {
+                TpepPickupDatetime = reader.GetDateTime(reader.GetOrdinal("tpep_pickup_datetime")),
+                TpepDropoffDateTime = reader.GetDateTime(reader.GetOrdinal("tpep_dropoff_datetime")),
+                PassengerCount = reader.GetInt32(reader.GetOrdinal("passenger_count")),
+                TripDistance = reader.GetDouble(reader.GetOrdinal("trip_distance")),
+                StoreAndFwdFlag = reader.GetString(reader.GetOrdinal("store_and_fwd_flag")),
+                PULocationId = reader.GetInt32(reader.GetOrdinal("PULocationID")),
+                DOLocationId = reader.GetInt32(reader.GetOrdinal("DOLocationID")),
+                FareAmount = reader.GetDouble(reader.GetOrdinal("fare_amount")),
+                TipAmount = reader.GetDouble(reader.GetOrdinal("tip_amount"))
+            };
+            fares.Add(fare);
+        }
+
+        return fares;
     }
 }
