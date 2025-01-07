@@ -1,4 +1,5 @@
 using System.Data;
+using System.Data.Common;
 using System.Globalization;
 using System.Security.Cryptography;
 using CsvHelper;
@@ -25,17 +26,14 @@ public class CabDataProcessor : ICabDataProcessor
         {
             return ErrorOr<bool>.Failure("Path to file cannot be empty");
         }
-
         await using var connection = _dbConnectionFactory.GetConnection();
         await connection.OpenAsync();
         var dataTable = new DataTable();
-
         DataColumn column = new DataColumn();
-        column.DataType = System.Type.GetType("System.Int32");
+        column.DataType = typeof(int);
         column.AutoIncrement = true;
         column.AutoIncrementSeed = 1;
         column.AutoIncrementStep = 1;
-
 
         dataTable.Columns.Add(column);
         dataTable.Columns.Add("tpep_pickup_datetime", typeof(DateTime));
@@ -53,51 +51,35 @@ public class CabDataProcessor : ICabDataProcessor
         var records = csv.GetRecords<dynamic>();
         foreach (var record in records)
         {
-            try
-            {
-                var tpepPickupDatetime = DateTime.Parse(record.tpep_pickup_datetime);
-                var tpepDropoffDatetime = DateTime.Parse(record.tpep_dropoff_datetime);
-                var passengerCount = 0;
-                int.TryParse(record.passenger_count as string, out passengerCount);
-                var tripDistance = double.Parse(record.trip_distance as string);
-                var storeAndFwdFlag = (record.store_and_fwd_flag as string).Trim() == "Y" ? "Yes" : "No";
-                var pulocationId = int.Parse(record.PULocationID as string);
-                var dolocationId = int.Parse(record.DOLocationID as string);
-                var fareAmount = double.Parse(record.fare_amount as string);
-                var tipAmount = double.Parse(record.tip_amount as string);
-                dataTable.Rows.Add(
-                    DBNull.Value,
-                    tpepPickupDatetime,
-                    tpepDropoffDatetime,
-                    passengerCount,
-                    tripDistance,
-                    storeAndFwdFlag,
-                    pulocationId,
-                    dolocationId,
-                    fareAmount,
-                    tipAmount);
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine(e);
-                throw;
-            }
+            var tpepPickupDatetime = DateTime.Parse(record.tpep_pickup_datetime);
+            var tpepDropoffDatetime = DateTime.Parse(record.tpep_dropoff_datetime);
+            int.TryParse(record.passenger_count as string, out int passengerCount);
+            var tripDistance = double.Parse(record.trip_distance.ToString());
+            var storeAndFwdFlag = record.store_and_fwd_flag.ToString().Trim() == "Y" ? "Yes" : "No";
+            var pulocationId = int.Parse(record.PULocationID.ToString());
+            var dolocationId = int.Parse(record.DOLocationID.ToString());
+            var fareAmount = double.Parse(record.fare_amount.ToString());
+            var tipAmount = double.Parse(record.tip_amount.ToString());
+            dataTable.Rows.Add(
+                DBNull.Value,
+                tpepPickupDatetime,
+                tpepDropoffDatetime,
+                passengerCount,
+                tripDistance,
+                storeAndFwdFlag,
+                pulocationId,
+                dolocationId,
+                fareAmount,
+                tipAmount);
         }
 
-        try
-        {
-            using var sqlBulkCopy = new SqlBulkCopy((SqlConnection)connection);
-            sqlBulkCopy.DestinationTableName = "cab_data";
-            await sqlBulkCopy.WriteToServerAsync(dataTable);
-        }
-        catch (Exception e)
-        {
-            return ErrorOr<bool>.Failure(e.Message);
-        }
+        using var sqlBulkCopy = new SqlBulkCopy((SqlConnection)connection);
+        sqlBulkCopy.DestinationTableName = "cab_data";
+        await sqlBulkCopy.WriteToServerAsync(dataTable);
 
         return ErrorOr<bool>.Success(true);
     }
-    
+
     public async Task<ErrorOr<bool>> RemoveDuplicatesAndMoveToCsv(string csvFilePath)
     {
         await using var streamWriter = new StreamWriter(csvFilePath);
@@ -126,7 +108,7 @@ public class CabDataProcessor : ICabDataProcessor
                                             AND t.tpep_dropoff_datetime = d.tpep_dropoff_datetime
                                             AND t.passenger_count = d.passenger_count;
                           """;
-        
+
         var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
@@ -141,7 +123,7 @@ public class CabDataProcessor : ICabDataProcessor
             var tipAmount = reader.GetDouble("tip_amount");
             csvWriter.WriteRecord(new
             {
-                tpepPickupDatetime,tpepDropoffDatetime,passengerCount,tripDistance,storeAndFwdFlag,
+                tpepPickupDatetime, tpepDropoffDatetime, passengerCount, tripDistance, storeAndFwdFlag,
                 pulocationId, dolocationId, fareAmount, tipAmount
             });
             await csvWriter.NextRecordAsync();
@@ -168,9 +150,10 @@ public class CabDataProcessor : ICabDataProcessor
                           );
                           """;
         await cmd.ExecuteNonQueryAsync();
-        
+
         return ErrorOr<bool>.Success(true);
     }
+
     public async Task<long> FindLocationWithTheHighestTipAmountOnAverage()
     {
         await using var connection = _dbConnectionFactory.GetConnection();
@@ -184,7 +167,7 @@ public class CabDataProcessor : ICabDataProcessor
         var id = (int?)await dbCommand.ExecuteScalarAsync();
         return id.Value;
     }
-    
+
     public async Task<List<Fare>> Top100LongestFaresByDistance()
     {
         List<Fare> fares = [];
@@ -198,24 +181,12 @@ public class CabDataProcessor : ICabDataProcessor
         await using var reader = await dbCommand.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-            var fare = new Fare
-            {
-                TpepPickupDatetime = reader.GetDateTime(reader.GetOrdinal("tpep_pickup_datetime")),
-                TpepDropoffDateTime = reader.GetDateTime(reader.GetOrdinal("tpep_dropoff_datetime")),
-                PassengerCount = reader.GetInt32(reader.GetOrdinal("passenger_count")),
-                TripDistance = reader.GetDouble(reader.GetOrdinal("trip_distance")),
-                StoreAndFwdFlag = reader.GetString(reader.GetOrdinal("store_and_fwd_flag")),
-                PULocationId = reader.GetInt32(reader.GetOrdinal("PULocationID")),
-                DOLocationId = reader.GetInt32(reader.GetOrdinal("DOLocationID")),
-                FareAmount = reader.GetDouble(reader.GetOrdinal("fare_amount")),
-                TipAmount = reader.GetDouble(reader.GetOrdinal("tip_amount"))
-            };
-            fares.Add(fare);
+            fares.Add(ReadFare(reader));
         }
 
         return fares;
     }
-    
+
     public async Task<List<Fare>> Top100LongestFaresByTime()
     {
         List<Fare> fares = [];
@@ -229,23 +200,12 @@ public class CabDataProcessor : ICabDataProcessor
         await using var reader = await dbCommand.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-            var fare = new Fare
-            {
-                TpepPickupDatetime = reader.GetDateTime(reader.GetOrdinal("tpep_pickup_datetime")),
-                TpepDropoffDateTime = reader.GetDateTime(reader.GetOrdinal("tpep_dropoff_datetime")),
-                PassengerCount = reader.GetInt32(reader.GetOrdinal("passenger_count")),
-                TripDistance = reader.GetDouble(reader.GetOrdinal("trip_distance")),
-                StoreAndFwdFlag = reader.GetString(reader.GetOrdinal("store_and_fwd_flag")),
-                PULocationId = reader.GetInt32(reader.GetOrdinal("PULocationID")),
-                DOLocationId = reader.GetInt32(reader.GetOrdinal("DOLocationID")),
-                FareAmount = reader.GetDouble(reader.GetOrdinal("fare_amount")),
-                TipAmount = reader.GetDouble(reader.GetOrdinal("tip_amount"))
-            };
-            fares.Add(fare);
+            fares.Add(ReadFare(reader));
         }
 
         return fares;
     }
+
     public async Task<List<Fare>> SearchByPickupLocation(int pickupLocationId)
     {
         List<Fare> fares = [];
@@ -263,21 +223,25 @@ public class CabDataProcessor : ICabDataProcessor
         await using var reader = await dbCommand.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-            var fare = new Fare
-            {
-                TpepPickupDatetime = reader.GetDateTime(reader.GetOrdinal("tpep_pickup_datetime")),
-                TpepDropoffDateTime = reader.GetDateTime(reader.GetOrdinal("tpep_dropoff_datetime")),
-                PassengerCount = reader.GetInt32(reader.GetOrdinal("passenger_count")),
-                TripDistance = reader.GetDouble(reader.GetOrdinal("trip_distance")),
-                StoreAndFwdFlag = reader.GetString(reader.GetOrdinal("store_and_fwd_flag")),
-                PULocationId = reader.GetInt32(reader.GetOrdinal("PULocationID")),
-                DOLocationId = reader.GetInt32(reader.GetOrdinal("DOLocationID")),
-                FareAmount = reader.GetDouble(reader.GetOrdinal("fare_amount")),
-                TipAmount = reader.GetDouble(reader.GetOrdinal("tip_amount"))
-            };
-            fares.Add(fare);
+            fares.Add(ReadFare(reader));
         }
 
         return fares;
+    }
+
+    private Fare ReadFare(DbDataReader reader)
+    {
+        return new Fare
+        {
+            TpepPickupDatetime = reader.GetDateTime(reader.GetOrdinal("tpep_pickup_datetime")),
+            TpepDropoffDateTime = reader.GetDateTime(reader.GetOrdinal("tpep_dropoff_datetime")),
+            PassengerCount = reader.GetInt32(reader.GetOrdinal("passenger_count")),
+            TripDistance = reader.GetDouble(reader.GetOrdinal("trip_distance")),
+            StoreAndFwdFlag = reader.GetString(reader.GetOrdinal("store_and_fwd_flag")),
+            PULocationId = reader.GetInt32(reader.GetOrdinal("PULocationID")),
+            DOLocationId = reader.GetInt32(reader.GetOrdinal("DOLocationID")),
+            FareAmount = reader.GetDouble(reader.GetOrdinal("fare_amount")),
+            TipAmount = reader.GetDouble(reader.GetOrdinal("tip_amount"))
+        };
     }
 }
