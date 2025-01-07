@@ -1,0 +1,17 @@
+﻿services:
+  etl-database:
+    image: mcr.microsoft.com/mssql/server
+    container_name: etl-database
+    restart: always
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=SwN12345678
+      - TZ=Europe/Kyiv
+    ports:
+      - "1433:1433"
+    volumes:
+      - etl-database:/var/opt/mssql
+  
+
+volumes:
+  etl-database:
