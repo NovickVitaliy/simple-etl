@@ -12,6 +12,5 @@
     volumes:
       - etl-database:/var/opt/mssql
   
-
 volumes:
   etl-database:
